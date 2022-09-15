@@ -9,7 +9,7 @@ const initState = {
   statsToPresent: [],
   indexSymbols: ["SPX", "NDX"],
   symbolsText: {"SPX": "S&P 500 (SPX)", "NDX": "Nasdaq 100 (NDX)"},
-  selectedIndexSymbol: "SPX",
+  selectedIndexSymbol: "NDX",
   firstYear: 0,
   lastYear: 0,
   selectedFirstYear: 0,
@@ -37,7 +37,7 @@ class App extends React.Component {
   recalculate = () => {
     this.setState({dataLoaded: false});
     setTimeout(() => {
-      this.handleDataLoaded(this.loadFromLocalStorage(), false);
+      this.handleDataLoaded(this.loadFromLocalStorage(), false, true);
     }, 500);
   }
 
@@ -180,15 +180,28 @@ class App extends React.Component {
     }
     return newChartData;
   }
-  handleDataLoaded = (stocksData, saveToLocal) => {
+  handleDataLoaded = (stocksData, saveToLocal, keepUiState) => {
     if (saveToLocal) {
       this.saveToLocalStorage(stocksData);
     }
-    this.allData = this.buildDataForChart(stocksData, this.state.indexSymbols);
+    this.allData = this.buildDataForChart(stocksData, this.state.indexSymbols, keepUiState);
     let chartData = this.getDataToPresent(this.allData, this.state.indexSymbols);
     this.setState({ allYearsChartData: structuredClone(chartData) });
     this.normalizeAndCalculateReturns(chartData);
     this.setState({ dataLoaded: true });
+  }
+
+  filterRelevenatDataForSelectedDates = (data) => {
+    let dataInRange = [];
+    let startLimit = moment(this.state.firstYear + "-01-01");
+    let endLimit = moment((this.state.lastYear + 1) + "-01-01");
+    data.forEach(row => {
+      let curDate = moment(row["date"]);
+      if (curDate >= startLimit && curDate <= endLimit) {
+        dataInRange.push(row);
+      }
+    })
+    return dataInRange
   }
 
   normalizeAndCalculateReturns = (data) => {
@@ -209,16 +222,7 @@ class App extends React.Component {
           yearsToCalculate.push(year);
         }
       });
-      let dataInRangeForStats = [];
-      let startLimit = moment(this.state.firstYear + "-01-01");
-      let endLimit = moment((this.state.lastYear + 1) + "-01-01");
-      this.allData.forEach(row => {
-        let curDate = moment(row["date"]);
-        if (curDate >= startLimit && curDate <= endLimit) {
-          dataInRangeForStats.push(row);
-        }
-      })
-
+      let dataInRangeForStats = this.filterRelevenatDataForSelectedDates(this.allData);
       let stats = [];
       this.state.indexSymbols.forEach(symbol => {
         stats = this.calculateAllAnnualReturns(dataInRangeForStats, yearsToCalculate, symbol + "_value", 1, yearsSpan, stats);
@@ -243,7 +247,7 @@ class App extends React.Component {
   getStocksData = () => {
     let localStocksData = this.loadFromLocalStorage();
     if (localStocksData) {
-      this.handleDataLoaded(localStocksData, false);
+      this.handleDataLoaded(localStocksData, false, false);
       return;
     }
 
@@ -257,7 +261,7 @@ class App extends React.Component {
     }).then((res) => res.json())
       .then(
         (stocksData) => {
-          this.handleDataLoaded(stocksData, true);
+          this.handleDataLoaded(stocksData, true, false);
         },
         (error) => {
           console.log("Error: " + error);
@@ -303,6 +307,7 @@ class App extends React.Component {
 
     chartData = this.reduceChartDataDensity(chartData, 1500);
 
+    // normalize all leverages to start with the same number
     chartData.forEach((item) => {
       symbols.forEach((symbol) => {
         item[symbol] = item[symbol] * multipliers[symbol];
@@ -392,25 +397,31 @@ class App extends React.Component {
     return moment(current).month() !== moment(prev).month();
   }
 
-  buildDataForChart = (stocksData, symbols) => {
+  buildDataForChart = (stocksData, symbols, keepUiState) => {
     let data = [];
     let prevRow = null;
     let annualFee = 0.0095;
     let startWith = this.state.initialCapital;
     let firstYear = 0;
     let lastYear = 0;
-    stocksData.forEach(row => {
-      this.countTradingDaysPerYear(moment(row["date"]));
-      if (firstYear === 0 || firstYear > moment(row["date"]).year()) {
-        firstYear = moment(row["date"]).year();
-      }
-      if (lastYear === 0 || lastYear < moment(row["date"]).year()) {
-        lastYear = moment(row["date"]).year();
-      }
-    });
-    this.setYearsRange(firstYear, lastYear, firstYear, lastYear);
-
-    stocksData.forEach(row => {
+    let filteredStockData = stocksData;
+    if (!keepUiState){
+      stocksData.forEach(row => {
+        this.countTradingDaysPerYear(moment(row["date"]));
+        if (firstYear === 0 || firstYear > moment(row["date"]).year()) {
+          firstYear = moment(row["date"]).year();
+        }
+        if (lastYear === 0 || lastYear < moment(row["date"]).year()) {
+          lastYear = moment(row["date"]).year();
+        }
+      });
+      this.setYearsRange(firstYear, lastYear, firstYear, lastYear);
+    }
+    else{
+      filteredStockData = this.filterRelevenatDataForSelectedDates(stocksData)
+    }
+   
+    filteredStockData.forEach(row => {
       let investPerMonth = 0;
       let dailyFee = this.dailyFee(annualFee, row["date"]);
 
@@ -450,7 +461,8 @@ class App extends React.Component {
       prevRow = row;
     })
 
-    this.setState({ data: data });
+    //this.setState({ data: data });
+    console.log("firstYear" + this.state.firstYear);
     return data;
   }
 
@@ -467,6 +479,7 @@ class App extends React.Component {
       this.setState({ lastYear: year, selectedLastYear: year });
     }
     setTimeout(() => {
+      /*
       let newStartLimit = moment(this.state.firstYear + "-01-01");
       let newEndLimit = moment((this.state.lastYear + 1) + "-01-01");
       let cloneData = structuredClone(this.state.allYearsChartData);
@@ -478,6 +491,8 @@ class App extends React.Component {
         }
       })
       this.normalizeAndCalculateReturns(newChartData);
+      */
+     this.recalculate()
     }, 30);
   }
 
@@ -592,7 +607,7 @@ class App extends React.Component {
                     <Area type="monotone" name={"Simulated " + this.state.selectedIndexSymbol + " x2"} dataKey={this.state.selectedIndexSymbol + "X2"} stroke="#80B499" fillOpacity={0.3} fill={"url(#colorX2)"} />
                     <Area type="monotone" name={"Simulated " + this.state.selectedIndexSymbol + " x3"} dataKey={this.state.selectedIndexSymbol + "X3"} stroke="#00C492" fillOpacity={0.3} fill={"url(#colorX3)"} />
                     <Area type="monotone" name={"Simulated " + this.state.selectedIndexSymbol + " x4"} dataKey={this.state.selectedIndexSymbol + "X4"} stroke="#d9c771" fillOpacity={0.3} fill={"url(#colorX4)"} />
-                    {this.state.selectedIndexSymbol === "NDX" ?
+                    {this.state.selectedIndexSymbol === "NDX" && this.state.firstYear >= 2012 ?
                         <Area type="monotone" name={"TQQQ"} dataKey={"TQQQ"} stroke="#cf36cf" fillOpacity={0.3} fill={"url(#colorTQQQ)"} />
                     : null}
                   </AreaChart>
